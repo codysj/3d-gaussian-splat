@@ -18,6 +18,7 @@ from support import Scene, camera, render
 
 torch.set_num_threads(int(os.environ.get('THREADS', 1)))
 SIZES = (128, 256, 384)  # dense renderer allocates gaussians x pixels; 384 is ~70 MB
+DEMO = os.environ.get('DEMO', 'demo')  # folder holding checkpoint.pt and initial.npz
 
 
 def load_checkpoint(path):
@@ -27,10 +28,12 @@ def load_checkpoint(path):
 
 
 # Loaded once at startup. Requests render from a copy and never modify these.
-with np.load('demo/initial.npz') as d:
+with np.load(f'{DEMO}/initial.npz') as d:
     INITIAL = Scene(tuple(d[f'init_{i}'] for i in range(5)))
-TRAINED = load_checkpoint('demo/checkpoint.pt')
+TRAINED = load_checkpoint(f'{DEMO}/checkpoint.pt')
 N = len(TRAINED.means)
+# Dense path is gaussians x pixels; past a few hundred use the per-splat bounded loop.
+MODE = 'dense' if N <= 300 else 'bounded'
 LOCK = threading.Lock()  # ponytail: one render at a time; fine for a demo box
 
 
@@ -57,7 +60,7 @@ def render_png(q):
         if 'ovr' in q:
             opacity[gi] = param(q, 'op', 0, 1, .9)
         W, eye = camera(angle, elevation=elev)
-        im = render((means, scales, quats, opacity, colors), W, eye, size, core, order=order)
+        im = render((means, scales, quats, opacity, colors), W, eye, size, core, order=order, mode=MODE)
     buf = io.BytesIO()
     Image.fromarray((im.clamp(0, 1).numpy() * 255).round().astype('uint8')).save(buf, 'PNG')
     return buf.getvalue()

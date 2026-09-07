@@ -69,3 +69,23 @@ python run.py make --reference --size 128 --out outputs/validation_data --thread
 python run.py train --reference --size 64 --steps 500 --threads 1 --data outputs/validation_data/dataset.npz --out outputs/validation_multi
 python run.py train --reference --size 64 --steps 500 --threads 1 --views one --data outputs/validation_data/dataset.npz --out outputs/validation_one
 ```
+
+## Gnome scene on RunPod (GPU; dense memory is about 1 MB per Gaussian at 256 px)
+Template: RunPod PyTorch (CUDA). Keep its torch; do NOT pip install torch from requirements.txt.
+```bash
+cd /workspace && git clone https://github.com/codysj/3d-gaussian-splat gaussian_workbook && cd gaussian_workbook
+pip install numpy matplotlib pillow plyfile trimesh
+nvidia-smi && python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python run.py check --device cuda
+python scene_from_mesh.py assets/garden_gnome/garden_gnome_1k.gltf --count 6000 --out assets/gnome_6000.npz
+python run.py make --device cuda --size 256 --scene assets/gnome_6000.npz --out outputs/gnome_data
+python run.py train --device cuda --size 256 --steps 2000 --data outputs/gnome_data/dataset.npz --out outputs/gnome_main
+python run.py eval --device cuda --size 256 --checkpoint outputs/gnome_main/checkpoint.pt --data outputs/gnome_data/dataset.npz --out outputs/gnome_eval
+python run.py ablate --device cuda --size 256 --checkpoint outputs/gnome_main/checkpoint.pt --out outputs/gnome_ablation
+python run.py export --device cuda --size 384 --frames 36 --checkpoint outputs/gnome_main/checkpoint.pt --out outputs/gnome_demo
+python -m pip freeze > environment-runpod.txt
+python -m zipfile -c gnome_results.zip outputs/gnome_main outputs/gnome_data/dataset.npz outputs/gnome_eval outputs/gnome_ablation outputs/gnome_demo/orbit.gif environment-runpod.txt
+```
+Download gnome_results.zip through the Jupyter file browser, then stop the Pod.
+`bench` uses the 31-Gaussian robot and says nothing about gnome cost; read the
+per-100-update timestamps from `train` instead.

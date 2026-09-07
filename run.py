@@ -42,7 +42,9 @@ def load_data(path, size, device):
 
 def make(args,core):
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
-    arrays=teacher_scene()
+    # --scene: five arrays from scene_from_mesh.py instead of the built-in robot.
+    arrays=teacher_scene() if not args.scene else tuple(
+        np.load(args.scene)[k] for k in ('means','scales','quats','opacity','colors'))
     truth=Scene(arrays,args.device)
     angles=np.linspace(0,2*math.pi,12,endpoint=False).astype('float32')
     frames=[]
@@ -278,6 +280,7 @@ def main():
     parser.add_argument('--resume')
     parser.add_argument('--checkpoint',default='outputs/main/checkpoint.pt')
     parser.add_argument('--frames',type=int,default=36)
+    parser.add_argument('--scene',help='npz from scene_from_mesh.py; make only')
     parser.add_argument('--stage',choices=['all','covariance','projection','weights','blend','gradient'],default='all')
     parser.add_argument('--threads',type=int,default=4)
     args=parser.parse_args()
