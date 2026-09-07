@@ -16,4 +16,4 @@ NOTES.md
 PROGRESS.md
 
 # Demo assets are the one checkpoint the app serves; keep them tracked.
-!demo/checkpoint.pt
+!demo/*/checkpoint.pt
