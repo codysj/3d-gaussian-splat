@@ -1,0 +1,527 @@
+GAUSSIAN SPLAT RENDERER: PROJECT RUNDOWN
+==========================================
+Written 7 September 2026. Covers the project from the empty starter to the
+deployed demo at https://gaussian-splat-demo.onrender.com/.
+
+Intended reader: someone with general technical literacy but no machine
+learning or graphics background. Terms are defined the first time they
+appear. A glossary is at the end.
+
+
+CONTENTS
+--------
+ 1. What the project is, in one paragraph
+ 2. Background: the ideas you need
+ 3. What the renderer does, step by step
+ 4. What training does, step by step
+ 5. How the project was built, in order, with the problems hit along the way
+ 6. Measured results
+ 7. How this differs from the original 3D Gaussian Splatting method
+ 8. Where this technique is actually used
+ 9. Honest scope: what this is and is not
+10. Who wrote what
+11. Glossary
+
+
+1. WHAT THE PROJECT IS
+----------------------
+A small but complete implementation of "3D Gaussian splatting", a technique
+for representing a 3D scene as a cloud of soft, coloured, semi-transparent
+blobs and drawing pictures of that scene from any camera position. The
+project has three parts:
+
+  - A renderer: code that takes the blobs plus a camera and produces an image.
+  - A trainer: code that starts from a wrong set of blobs and repeatedly
+    nudges them until the images they produce match a set of target images.
+  - A live web page where anyone can move the camera, switch settings, and
+    see the renderer run on every click.
+
+Two scenes are included: a 31-blob robot supplied by the workbook this
+project follows, and a 10,000-blob garden gnome built from a free 3D model.
+
+The entire renderer is about sixty lines of Python using the PyTorch library.
+The point of the project is that every one of those lines is inspectable and
+explainable, not that it is fast or large.
+
+
+2. BACKGROUND: THE IDEAS YOU NEED
+---------------------------------
+
+2.1 Representing a 3D scene
+A picture is a grid of pixels, each with a colour. A 3D scene is something
+you can take pictures of from many positions. Traditional 3D graphics
+represents a scene as a mesh: a surface made of many small flat triangles,
+with an image (a texture) wrapped over it for colour.
+
+This project uses a different representation. The scene is a list of
+"Gaussians". Each Gaussian is a soft blob defined by a handful of numbers:
+
+  position   - where its centre is (3 numbers: x, y, z)
+  scale      - how wide it is along each of its own three axes (3 numbers)
+  rotation   - which way those axes point (4 numbers, a "quaternion")
+  colour     - red, green, blue (3 numbers)
+  opacity    - how much it blocks what is behind it (1 number, 0 to 1)
+
+"Gaussian" is the name of the bell-curve shape: the blob is fully present at
+its centre and fades out smoothly with distance, with no hard edge. In three
+dimensions the shape is a soft ellipsoid (a stretched sphere).
+
+Fourteen numbers per blob. The gnome is 10,000 blobs, so 140,000 numbers in
+total. There is no mesh and no texture at render time; only those numbers.
+
+2.2 Why a soft blob rather than a point or a triangle
+A single point has no size, so it cannot cover a pixel. A triangle has a
+hard edge. A Gaussian covers an area, fades smoothly, and, critically, every
+one of its fourteen numbers affects the final image in a smooth, continuous
+way. That last property is what makes training possible (see 2.5).
+
+2.3 The camera
+A camera is described by where it is (the "eye" position) and which way it
+faces (three perpendicular directions: right, up, forward). To draw a 3D
+point on a 2D image you first express the point relative to the camera, then
+divide by its distance from the camera. Dividing by distance is what makes
+far things look small. This is called perspective projection.
+
+Two numbers describe the "lens": the focal length in pixels (how zoomed in
+the image is) and the image centre.
+
+2.4 Covariance
+"Covariance" is the standard mathematical way to describe the spread and
+orientation of a blob. For our purposes it is a 3-by-3 table of numbers
+built from the scale and rotation. The important properties:
+
+  - It can be moved into the camera's coordinate system with a fixed formula.
+  - It can be squashed from 3D to 2D (the blob's outline on the image is an
+    ellipse) with another fixed formula that uses the perspective projection.
+  - Given the 2D version, you can compute, for any pixel, how strongly the
+    blob influences that pixel: 1 at its centre, falling smoothly to 0.
+
+2.5 Training, loss, gradient, optimiser
+"Training" here means: start with blob numbers that are wrong, and
+repeatedly adjust them so that the pictures they produce match target
+pictures.
+
+  loss       - a single number measuring how wrong the current picture is.
+               We use mean squared error: for every pixel, take the
+               difference between the rendered colour and the target colour,
+               square it, and average over all pixels and colour channels.
+               Zero means a perfect match.
+  gradient   - for each of the 140,000 blob numbers, the direction and
+               amount by which changing that number would reduce the loss.
+               PyTorch computes all of these automatically from the renderer
+               code; this is called automatic differentiation, and it only
+               works because every operation in the renderer is smooth.
+  optimiser  - the rule that turns gradients into actual changes to the
+               numbers. We use Adam, a standard choice that adapts the step
+               size per number.
+  update     - one round of: render, compute loss, compute gradients, apply
+               the optimiser. Training is a few thousand updates.
+
+2.6 Held-out evaluation
+If you train against eight camera positions and then test against the same
+eight, a low loss proves little: the blobs may have memorised those exact
+views. So four camera positions are kept out of training entirely and the
+loss on those is reported separately. This is the "held-out" number quoted
+throughout. It measures whether the blobs form a real 3D object that looks
+right from new angles.
+
+
+3. WHAT THE RENDERER DOES, STEP BY STEP
+---------------------------------------
+Given a list of Gaussians and a camera, produce an image. In order:
+
+ 1. Convert stored numbers to physical ones. Scale is stored as a logarithm
+    so that it can never go negative; opacity and colour are stored as
+    unbounded numbers and squashed into 0..1 by the sigmoid function.
+    Training adjusts the stored numbers; rendering uses the physical ones.
+
+ 2. Reject Gaussians whose centre is behind or too close to the camera.
+    Perspective projection divides by distance, and dividing by zero or a
+    negative number is meaningless.
+
+ 3. Build each Gaussian's 3D covariance from its scale and rotation.
+    (core.covariance)
+
+ 4. Project each Gaussian into the image: compute its centre pixel and its 2D
+    covariance, the ellipse it covers on screen. This uses the perspective
+    formula and its local linear approximation, the "Jacobian".
+    (core.project)
+
+ 5. Sort the Gaussians from nearest to farthest by centre distance.
+
+ 6. For every Gaussian and every pixel, compute the influence weight:
+    1 at the Gaussian's centre, falling off with the ellipse's shape.
+    Multiply by opacity to get "alpha", the fraction of light this Gaussian
+    blocks at that pixel. (core.pixel_weights)
+
+ 7. Blend front to back. Walk the sorted list; each Gaussian contributes its
+    colour times its alpha times the fraction of light that reached it past
+    everything in front. Whatever fraction reaches the end is filled with the
+    background colour. (core.composite)
+
+Steps 3, 4, 6 and 7 are the five exercises in core.py (the fifth is the
+training update in section 4). Everything else is supplied wiring.
+
+Two versions of steps 6-7 exist. The "dense" version computes every Gaussian
+against every pixel in one large table, which is simple and is what training
+uses. The "bounded" version handles one Gaussian at a time and only touches
+the small rectangle of pixels it can reach; it uses far less memory and is
+what the web demo uses for the gnome. The bounded version cannot be trained
+through; the dense one can.
+
+
+4. WHAT TRAINING DOES, STEP BY STEP
+-----------------------------------
+ 1. Generate targets. Render the true scene from twelve camera positions in a
+    circle around it. Eight are for training, four are held out. Save the
+    images. (run.py make)
+
+ 2. Make a wrong starting point. Take the true blob numbers and add random
+    noise to positions, scales, rotations and colours, and reset all
+    opacities to 0.8. This is the "initial" scene the demo can show.
+
+ 3. Repeat for N updates: pick the next training camera, render, compute
+    loss against that camera's target, compute gradients, apply Adam.
+    (core.update, called by run.py train)
+
+ 4. Report the held-out loss before and after, save the trained numbers to a
+    checkpoint file, and write out the held-out renders for inspection.
+
+Note what step 2 implies: training here recovers a scene it was started
+close to. It does not discover a scene from nothing. Section 7 covers how
+the original method differs.
+
+
+5. HOW THE PROJECT WAS BUILT, IN ORDER
+--------------------------------------
+This section is chronological and includes what went wrong.
+
+5.1 Starting point
+A teaching workbook (30-page PDF) plus a starter repository with the wiring
+written and the five core functions left as "not implemented". Python 3.12
+and the CPU build of PyTorch 2.14 on a Windows laptop. Time budget: about a
+day.
+
+5.2 The five core functions
+Implemented from the workbook's equations. Verified by the supplied numeric
+checks, which test each function against hand-computable cases (for example:
+a blob with scales (2,1,1) rotated 90 degrees must have covariance diagonal
+(1,4,1)). The most important check compares the gradient PyTorch computes
+for one number against a "finite difference": nudge the number up and down
+by a tiny amount, re-render both times, and see how the loss changed. The
+two agreed to eight significant figures (2.4241505e-06 both ways), matching
+the value the workbook author reports for their own implementation.
+
+The training update was verified separately by actually training the robot:
+held-out loss fell from 0.0025 to 0.00015 in 200 updates on the laptop.
+
+5.3 Decision: skip the GPU for the robot
+The workbook assumes a rented GPU. Measurement showed the laptop CPU trains
+the 31-blob robot at 0.087 seconds per update at 256x256 pixels, so a full
+1200-update run is about two minutes. The GPU was skipped for this stage.
+
+5.4 Robot training results and two findings
+Multi-view training: held-out loss 2.64e-3 down to 7.0e-5.
+Two experiments that the workbook asks for, with their outcomes:
+
+  - Refinement. The workbook suggests continuing training at higher
+    resolution with smaller steps. Measured at the same resolution, this
+    made the held-out loss slightly worse (7.03e-5 to 8.00e-5). The likely
+    reason: the optimiser's internal state is reset when refinement starts,
+    so its first steps are poorly calibrated and it drifts. The unrefined
+    checkpoint is the one used.
+
+  - One-view ablation. Train on a single camera instead of eight. Loss on
+    that one camera fell, but held-out loss did not move at all (2.60e-3
+    against a starting 2.64e-3). One viewpoint does not pin down a 3D scene.
+
+5.5 The web application
+Requirement from the interview process: a live application, not a video.
+Built as a single Python file using only the standard library's HTTP server
+(no web framework), serving one HTML page and one image endpoint. Every
+request renders through the same core.py used for training, with gradients
+disabled, on a copy of the parameters so nothing a visitor does can alter
+the trained scene. Inputs are clamped to safe ranges.
+
+Deployed to Render (a hosting service) from a configuration file in the
+repository. Problems hit:
+
+  - The default PyTorch package pulls in about 2 GB of GPU libraries that a
+    CPU server cannot use. Fixed by pinning the CPU-only build.
+  - The page had no explicit colours, so in a dark-mode browser its text was
+    dark on dark. Fixed with two CSS declarations.
+  - Verified from outside the development machine: the rendered image from
+    the deployed server was pixel-for-pixel identical to a local render with
+    the same parameters (0 of 65,536 pixels differed).
+
+5.6 Investigating resolution
+Question raised: would rendering at 1080x1080 or higher on a GPU be more
+impressive? Tested by rendering the robot at 1024x1024. The image is the
+same picture with more pixels: no new detail appears, because the softness
+comes from having 31 large blobs, not from the pixel count. The renderer
+even scales its minimum blob footprint with image size, so the look is
+deliberately resolution-independent. Conclusion: detail comes from more,
+smaller Gaussians, not from more pixels.
+
+5.7 A richer scene: the garden gnome
+The constraint on a richer scene is not compute but source material. The
+original method builds scenes from photographs through a pipeline this
+project does not have (see section 7). The honest alternative: take a free
+3D mesh with a texture, sample points on its surface, and make each point a
+small Gaussian carrying the texture's colour at that spot. That produces a
+scene that is ours to claim (the mesh is CC0, meaning no restrictions), that
+training can then refine from a jittered start exactly as with the robot.
+
+Candidate models were surveyed for the properties that suit soft blobs:
+chunky rounded shapes, bold colour regions, a clear silhouette from every
+angle, no thin parts (legs, straps, feathers, fur) and no glass. The garden
+gnome from Poly Haven scored best.
+
+Problems hit:
+  - The mesh library's colour sampler expected an older material format and
+    crashed on the modern one the file used. One-line conversion.
+  - The mesh had to be moved and scaled to sit where the workbook's fixed
+    camera orbit expects an object. A first run at the robot's height left
+    the gnome filling only half the frame; a second run at 2.5 units fixed
+    that.
+
+5.8 GPU training and the one real performance bug
+With 10,000 Gaussians the dense renderer needs about 1 MB of memory per
+Gaussian at 256x256, which is beyond the laptop, so an A100 GPU was rented
+by the hour (about $1.20 total). The pod was driven over SSH from the laptop.
+
+The first timing probe ran at 2.35 seconds per update, roughly ten times
+slower than the memory traffic should allow. A profiler run showed 96% of
+GPU time in "bmm" (batched matrix multiply), launched 6,000 times per
+render. The cause was one line in pixel_weights that used PyTorch's einsum
+function to compute the influence formula. einsum is a general-purpose tool;
+for this particular shape it chose to run one tiny 2x2 matrix multiply per
+Gaussian instead of one large elementwise pass. Writing the 2x2 formula out
+by hand (a*dx*dx + 2*b*dx*dy + c*dy*dy) made it pure elementwise work. A
+direct benchmark on the same GPU measured 2279 ms before and 114 ms after
+for the same computation. Training went from 2.35 to about 0.2 seconds per
+update. All numeric checks were unchanged, because the mathematics is
+identical; only the execution path changed.
+
+5.9 6,000 versus 10,000 Gaussians
+Both were trained (6 and 10 minutes respectively). The 10,000 version has a
+higher held-out loss (2.8e-4 against 1.7e-4) but is visibly better: the
+eyes, the lantern's windows and the belt buckle resolve. The loss numbers
+are not comparable because the taller gnome covers more pixels; mean
+squared error over a mostly-black image is dominated by how much of the
+image is object. Comparing the held-out renders, not the number, is the
+right call, and the 10,000 version is the one served.
+
+5.10 Serving the gnome
+The dense renderer cannot run 10,000 Gaussians on a small server, so the
+app switches to the bounded per-Gaussian path above 300 Gaussians. That
+path's cost is proportional to the number of Gaussians, not pixels: a 512
+render costs almost the same as a 256 one. On the free hosting tier the
+gnome would have taken 10-25 seconds; on the $7/month tier it takes about
+5.5 seconds, and the robot 0.4 seconds.
+
+A small mistake caught before deploy: a rule in the repository's ignore file
+excluded all checkpoint files, so the gnome's checkpoint was about to be
+left out of the deployment. Caught by reviewing the commit's file list.
+
+5.11 Portfolio polish
+The page was rebuilt as a proper static HTML file: centred layout, grouped
+controls with one-line explanations, a visible "rendering..." state so a
+five-second wait does not look like a freeze, a short four-part commentary,
+attribution, and links to the author's portfolio and the original paper.
+
+
+6. MEASURED RESULTS
+-------------------
+All loss values are held-out mean squared error (lower is better). PSNR is
+the same information on a logarithmic scale where higher is better; 35-40
+is very close to the target for images like these.
+
+  Scene   Gaussians  Size  Updates  Device      Before   After    PSNR  Time
+  robot   31         256   1200     laptop CPU  2.64e-3  7.0e-5   41.5  2.4 min
+  robot   31         512   +400     laptop CPU  7.03e-5  8.00e-5  41.0  2.9 min  (refinement; no gain)
+  robot   31         256   1200     laptop CPU  2.64e-3  2.60e-3  25.8  2.2 min  (one view only; no gain)
+  gnome   6,000      256   2000     A100 GPU    5.67e-3  1.70e-4  37.7  6 min
+  gnome   10,000     256   2000     A100 GPU    8.56e-3  2.76e-4  35.6  10 min   (served)
+
+Rendering cost on the deployed server: robot 0.4 s, gnome 5.5 s per image.
+
+
+7. HOW THIS DIFFERS FROM THE ORIGINAL METHOD
+--------------------------------------------
+The original is "3D Gaussian Splatting for Real-Time Radiance Field
+Rendering" (Kerbl, Kopanas, Leimkuhler, Drettakis, SIGGRAPH 2023,
+https://arxiv.org/abs/2308.04079). The core idea and the maths of steps 3-7
+in section 3 are the same. Nearly everything around them is different:
+
+  Input
+    Original: a set of ordinary photographs of a real place or object, with
+    unknown camera positions. A separate tool (COLMAP, "structure from
+    motion") estimates the camera positions and produces a sparse 3D point
+    cloud, which becomes the initial Gaussians.
+    Ours: cameras are known exactly, the target images are rendered by our
+    own code, and the starting point is a perturbed copy of the answer.
+    This is the largest difference and the one to be clearest about.
+
+  Growing and pruning
+    Original: during training, Gaussians that are too large or in regions
+    with high error are split or cloned, and near-transparent ones are
+    deleted. The count grows from tens of thousands to millions.
+    Ours: the count is fixed from the start. There is no splitting, cloning,
+    or deletion.
+
+  Colour
+    Original: each Gaussian's colour depends on viewing direction, encoded
+    with spherical harmonics, which captures shine and reflections.
+    Ours: one fixed colour per Gaussian.
+
+  Renderer
+    Original: a custom GPU program that divides the image into 16x16 tiles,
+    assigns Gaussians to tiles, and processes them in parallel, with a
+    hand-written backward pass. This is what makes it real-time (over 100
+    frames per second) at millions of Gaussians.
+    Ours: the dense path evaluates every Gaussian against every pixel in
+    PyTorch, which is simple and transparent but scales as (Gaussians x
+    pixels) and is nowhere near real-time. The bounded path is a plain
+    Python loop.
+
+  Loss
+    Original: a mix of absolute pixel error and a structural similarity
+    measure (SSIM).
+    Ours: mean squared pixel error only.
+
+  Scale
+    Original: rooms and outdoor scenes, millions of Gaussians, 30+ minutes
+    of GPU training.
+    Ours: one object, up to 10,000 Gaussians, 10 minutes.
+
+  Visibility
+    Both sort by the Gaussian's centre depth, which is an approximation when
+    large Gaussians overlap. The original's tiled renderer sorts per tile;
+    ours sorts once per image.
+
+What is the same: the representation, the covariance construction, the
+projection and its Jacobian, the influence formula, front-to-back blending
+with transmittance, and the principle that the whole pipeline is
+differentiable so it can be trained by gradient descent.
+
+
+8. WHERE THIS TECHNIQUE IS ACTUALLY USED
+----------------------------------------
+Gaussian splatting became the dominant approach for "novel view synthesis"
+(making new pictures of a real scene from photographs) within a year of its
+2023 publication, largely displacing the earlier neural radiance field (NeRF)
+approach because it trains faster and renders in real time. Current uses:
+
+  - Virtual reality and augmented reality: capturing real rooms and objects
+    so they can be walked through in a headset.
+  - Real estate and architecture: photorealistic walkthroughs of properties
+    captured with a phone.
+  - Film and visual effects: capturing sets and locations for previsualisation
+    and virtual production backdrops.
+  - Robotics and autonomous vehicles: building simulation environments from
+    real sensor data to train and test navigation.
+  - Mapping and digital twins: city-scale captures from drones or vehicles.
+  - E-commerce: interactive 3D product views from a short video of the item.
+  - Cultural heritage: recording artefacts, sculptures and sites.
+  - Games and 3D content tools: Unity, Unreal and Blender all have plugins
+    or native support for viewing and editing splat scenes.
+
+The common thread is capture of real things. This project does not do
+capture; it implements and exercises the rendering and optimisation core
+that all of those applications sit on top of.
+
+
+9. HONEST SCOPE
+---------------
+What the project demonstrates:
+  - A working, verified, differentiable Gaussian splat renderer.
+  - A training loop that recovers a scene from a perturbed start, with the
+    improvement measured on cameras the training never saw.
+  - Two controlled experiments with clear outcomes (refinement did not help;
+    one view does not generalise).
+  - A diagnosed and fixed 20x performance problem.
+  - A deployed application where the renderer runs on every request.
+
+What it does not demonstrate:
+  - Reconstruction from photographs, or any handling of unknown cameras.
+  - Discovering a scene from nothing: the initialisation supplies most of
+    the geometry, and training refines it.
+  - Real-time rendering or scaling to millions of Gaussians.
+  - Any claim about the target images being independent evidence: they are
+    made by the same renderer that is being trained, so a bug shared by both
+    would cancel out. The hand-computed numeric checks and the finite-
+    difference gradient check exist precisely to guard against that.
+
+
+10. WHO WROTE WHAT
+------------------
+The starter repository, the wiring (support.py, run.py), the reference
+answers and the workbook were supplied by the workbook's author.
+
+The five core functions, the mesh-to-Gaussians script, the web application,
+the deployment configuration, and the performance fix were written by an AI
+coding assistant (Claude) at Cody's direction, working from the workbook's
+equations and not from the supplied answer key. Cody made the product
+decisions throughout: skipping the GPU for the robot, choosing to build a
+mesh-derived scene rather than load someone else's trained file, selecting
+the gnome, choosing the hosting tier, and setting the scope of the demo.
+
+This distinction matters for any conversation where the work is presented.
+The accurate claim is: Cody directed, ran, read and can explain this code;
+he did not independently author it. The local notes files record this in
+more detail.
+
+
+11. GLOSSARY
+------------
+Adam            An optimisation algorithm that turns gradients into parameter
+                updates, adapting the step size for each parameter.
+Alpha           The fraction of light a Gaussian blocks at a given pixel:
+                its influence weight times its opacity, capped at 0.99.
+Autograd        PyTorch's automatic differentiation: it records every
+                operation and can compute the gradient of any output with
+                respect to any input.
+Checkpoint      A saved file of all parameter values at some point in
+                training.
+Compositing     Combining several semi-transparent layers into one final
+                colour, front to back.
+Covariance      A matrix describing the spread and orientation of a
+                Gaussian. Built from scale and rotation; transformed by the
+                camera; squashed to 2D by projection.
+Dense renderer  Our simple path: every Gaussian evaluated against every
+                pixel in one large table. Memory and time scale with
+                Gaussians x pixels.
+Finite difference  Estimating a derivative by nudging an input up and down a
+                tiny amount and observing the output change. Used to verify
+                autograd independently.
+Gaussian        A bell-curve function; here, a soft 3D ellipsoid with colour
+                and opacity, the basic unit of the scene.
+Gradient        For each parameter, how much and in which direction the
+                loss changes when that parameter changes.
+Held-out        Data deliberately excluded from training and used only to
+                measure whether the result generalises.
+Jacobian        The matrix of how each output of a function responds to
+                each input. Used to approximate the nonlinear perspective
+                projection by a linear one around each Gaussian's centre.
+Logit           An unbounded number that the sigmoid function maps into
+                0..1. Opacity and colour are stored as logits so training
+                can never push them out of range.
+Loss            A single number measuring how wrong the current output is.
+                Here, mean squared pixel error.
+Mesh            A 3D surface made of triangles, the standard representation
+                in conventional graphics. Used here only as the source for
+                sampling the gnome's initial Gaussians.
+MSE             Mean squared error.
+Perspective projection  Mapping 3D points to 2D image positions by dividing
+                by depth, so distant objects appear smaller.
+PSNR            Peak signal-to-noise ratio. A logarithmic rescaling of MSE
+                where higher is better; 30+ is good, 40+ is very close.
+Quaternion      Four numbers representing a 3D rotation.
+Sigmoid         A function that squashes any number into the range 0..1.
+Splat           The 2D footprint a Gaussian leaves on the image; "splatting"
+                is drawing by depositing such footprints.
+Transmittance   The fraction of light that reaches a given depth after
+                passing through everything in front. Starts at 1 and is
+                multiplied by (1 - alpha) at each Gaussian.
+Update          One training step: render, loss, gradients, optimiser step.

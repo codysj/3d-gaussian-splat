@@ -8,7 +8,7 @@ __pycache__/
 outputs/
 *.pt
 results.zip
-
+docs/
 # Keep validation/ tracked: it is the author's reference evidence, not output.
 
 # Personal working notes and ownership record: local only.
