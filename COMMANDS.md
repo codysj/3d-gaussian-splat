@@ -77,8 +77,8 @@ cd /workspace && git clone https://github.com/codysj/3d-gaussian-splat gaussian_
 pip install numpy matplotlib pillow plyfile trimesh
 nvidia-smi && python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 python run.py check --device cuda
-python scene_from_mesh.py assets/garden_gnome/garden_gnome_1k.gltf --count 6000 --out assets/gnome_6000.npz
-python run.py make --device cuda --size 256 --scene assets/gnome_6000.npz --out outputs/gnome_data
+python scene_from_mesh.py assets/garden_gnome/garden_gnome_1k.gltf --count 10000 --out assets/gnome_10000.npz
+python run.py make --device cuda --size 256 --scene assets/gnome_10000.npz --out outputs/gnome_data
 python run.py train --device cuda --size 256 --steps 2000 --data outputs/gnome_data/dataset.npz --out outputs/gnome_main
 python run.py eval --device cuda --size 256 --checkpoint outputs/gnome_main/checkpoint.pt --data outputs/gnome_data/dataset.npz --out outputs/gnome_eval
 python run.py ablate --device cuda --size 256 --checkpoint outputs/gnome_main/checkpoint.pt --out outputs/gnome_ablation

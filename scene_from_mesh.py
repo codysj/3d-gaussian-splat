@@ -14,7 +14,7 @@ import trimesh
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('mesh')
 p.add_argument('--count', type=int, default=6000)
-p.add_argument('--height', type=float, default=1.8, help='object height in scene units')
+p.add_argument('--height', type=float, default=2.5, help='object height in scene units; 2.5 fills the fixed orbit')
 p.add_argument('--out', required=True)
 args = p.parse_args()
 
