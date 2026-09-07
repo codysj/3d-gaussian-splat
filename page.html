@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gaussian Splat Renderer — Cody Jung</title>
+<meta name="description" content="A from-scratch 3D Gaussian splatting renderer and trainer in PyTorch. Every image on this page is rendered on request by the training code.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%232f6fdd'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23f6f5f2' opacity='.9'/%3E%3C/svg%3E">
+<style>
+  :root { --bg: #f6f5f2; --ink: #1c1c1c; --muted: #6b6b6b; --line: #e2dfd8; --accent: #2f6fdd; --card: #090b10; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 2.25rem 1.25rem 3rem; }
+
+  header { margin-bottom: 1.75rem; }
+  header h1 { font-size: 1.7rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  header p { margin: 0 0 .5rem; color: var(--muted); }
+  .links a { margin-right: 1.1rem; font-size: .92rem; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 2rem; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; background: var(--card); border-radius: 12px; aspect-ratio: 1; max-width: 640px; overflow: hidden; }
+  .stage img { display: block; width: 100%; height: 100%; transition: opacity .15s; }
+  .stage.loading img { opacity: .35; }
+  .status { position: absolute; left: .8rem; bottom: .7rem; font-size: .82rem; color: #d6dae2;
+            background: rgba(0,0,0,.55); padding: .2rem .55rem; border-radius: 4px; }
+  .caption { color: var(--muted); font-size: .85rem; margin: .6rem 0 0; max-width: 640px; }
+
+  fieldset { border: 1px solid var(--line); border-radius: 10px; padding: .7rem 1rem .85rem; margin: 0 0 .9rem; background: #fff; }
+  legend { font-weight: 600; font-size: .9rem; padding: 0 .35rem; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin: .45rem 0; font-size: .92rem; }
+  label > span:first-child { flex: 1; }
+  output { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .85rem; min-width: 2.6em; text-align: right; }
+  input[type=range] { width: 130px; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+  select, input[type=number] { font: inherit; font-size: .9rem; padding: .2rem .35rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; max-width: 200px; }
+  input[type=number] { width: 5.5em; }
+  .hint { color: var(--muted); font-size: .8rem; line-height: 1.4; margin: .5rem 0 0; }
+  button { font: inherit; font-weight: 600; width: 100%; padding: .6rem; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: wait; }
+
+  .about { margin-top: 2.75rem; padding-top: 1.75rem; border-top: 1px solid var(--line);
+           display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.6rem 2rem; }
+  .about h2 { grid-column: 1 / -1; font-size: 1.1rem; margin: 0 0 -.4rem; }
+  .about h3 { font-size: .95rem; margin: 0 0 .35rem; }
+  .about p { margin: 0; font-size: .9rem; color: #333; }
+  code { font-size: .85em; background: #eeece7; padding: .05em .3em; border-radius: 4px; }
+
+  footer { margin-top: 2.75rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Gaussian Splat Renderer</h1>
+  <p>A 3D Gaussian splatting renderer and trainer written from scratch in PyTorch. Every image here is produced on request by the same code that trained the scene.</p>
+  <nav class="links">
+    <a href="https://codyjung.vercel.app">Cody Jung</a>
+    <a href="https://arxiv.org/abs/2308.04079">Original paper (Kerbl et al., 2023)</a>
+  </nav>
+</header>
+
+<main>
+  <div>
+    <div class="stage" id="stage">
+      <img id="out" alt="rendered scene">
+      <span class="status" id="status">rendering…</span>
+    </div>
+    <p class="caption">Rendered on a CPU with no caching and no pre-computed frames. The robot takes under a second; the 10,000-Gaussian gnome takes about five.</p>
+  </div>
+
+  <form id="f">
+    <fieldset>
+      <legend>View</legend>
+      <label><span>Model</span>
+        <select name="model"><!--OPTIONS--></select></label>
+      <label><span>Camera angle</span>
+        <input name="angle" type="range" min="0" max="360" value="20"><output for="angle" id="angle_out">20°</output></label>
+      <label><span>Elevation</span>
+        <input name="elev" type="range" min="-1" max="1.5" step=".05" value=".35"><output id="elev_out">0.35</output></label>
+      <label><span>Image size</span>
+        <select name="size"><option>256</option><option selected>384</option><option>512</option></select></label>
+      <p class="hint">Orbit the camera. The scene's parameters never change; only the viewpoint does.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Ablations</legend>
+      <label><span>Scene</span>
+        <select name="scene"><option value="trained">trained</option><option value="initial">initial (before training)</option></select></label>
+      <label><span>Depth order</span>
+        <select name="order"><option value="depth">near to far (correct)</option><option value="reverse">far to near (wrong)</option></select></label>
+      <label><span>Force spherical, same volume</span><input name="iso" type="checkbox"></label>
+      <p class="hint"><b>Initial</b> shows the perturbed starting point training recovered from. <b>Reversed</b> draws far splats over near ones. <b>Spherical</b> squashes every ellipsoid into a ball of equal volume, which is why orientation and stretch matter.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Poke one Gaussian</legend>
+      <label><span>Gaussian index</span><input name="gi" type="number" min="0" max="9999" value="0"></label>
+      <label><span>Override its opacity</span><input name="ovr" type="checkbox"></label>
+      <label><span>Opacity value</span>
+        <input name="op" type="range" min="0" max="1" step=".01" value=".9"><output id="op_out">0.90</output></label>
+      <p class="hint">Edits apply to a copy of the parameters for this one render; the trained scene is never modified.</p>
+    </fieldset>
+
+    <button id="btn">Render</button>
+  </form>
+</main>
+
+<section class="about">
+  <h2>What you are looking at</h2>
+  <div>
+    <h3>The representation</h3>
+    <p>The scene is a cloud of 3D Gaussians: soft ellipsoids, each with a position, three scales, a rotation, a colour and an opacity. There is no mesh and no texture at render time, only those numbers.</p>
+  </div>
+  <div>
+    <h3>What happens when you click</h3>
+    <p>For every Gaussian: build its 3D covariance from scale and rotation, project it through the camera into a screen-space ellipse, sort by depth, then blend front to back into the pixels it touches. That is the whole renderer, in about sixty lines of PyTorch, and it is differentiable, so the same code drives training.</p>
+  </div>
+  <div>
+    <h3>What training did</h3>
+    <p>The gnome began as 10,000 points sampled from a <a href="https://polyhaven.com/a/garden_gnome">CC0 mesh</a>, then had every parameter jittered. Two thousand gradient steps against eight rendered views pulled it back; error on four unseen views fell from 8.6e-3 to 2.8e-4. Select <i>initial</i> to see the starting point. The robot is a 31-Gaussian scene trained on a laptop CPU.</p>
+  </div>
+  <div>
+    <h3>What this is not</h3>
+    <p>A reconstruction pipeline. Cameras are known, targets are synthetic, the starting point is a perturbation of the answer, and the renderer is dense rather than the paper's tiled rasteriser. It exists to make the maths inspectable, not to compete with the original.</p>
+  </div>
+</section>
+
+<footer>
+  Built by <a href="https://codyjung.vercel.app">Cody Jung</a>. Method: Kerbl, Kopanas, Leimkühler, Drettakis, <a href="https://arxiv.org/abs/2308.04079">3D Gaussian Splatting for Real-Time Radiance Field Rendering</a>, SIGGRAPH 2023. Gnome mesh by Poly Haven (CC0).
+</footer>
+</div>
+
+<script>
+const f = document.getElementById('f'), out = document.getElementById('out'), stage = document.getElementById('stage'),
+      status = document.getElementById('status'), btn = document.getElementById('btn');
+const show = (name, fmt) => { const el = document.getElementById(name + '_out');
+  f[name].addEventListener('input', () => el.textContent = fmt(f[name].value)); el.textContent = fmt(f[name].value); };
+show('angle', v => v + '°'); show('elev', v => (+v).toFixed(2)); show('op', v => (+v).toFixed(2));
+function capIndex() { f.gi.max = f.model.selectedOptions[0].dataset.n - 1; if (+f.gi.value > f.gi.max) f.gi.value = f.gi.max; }
+f.model.addEventListener('change', capIndex); capIndex();
+
+function go(e) {
+  if (e) e.preventDefault();
+  stage.classList.add('loading'); btn.disabled = true; status.textContent = 'rendering…';
+  const t0 = performance.now(), im = new Image();
+  const done = msg => { stage.classList.remove('loading'); btn.disabled = false; status.textContent = msg; };
+  im.onload = () => { out.src = im.src; done('rendered in ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s'); };
+  im.onerror = () => done('render failed, try again');
+  im.src = '/render?' + new URLSearchParams(new FormData(f));
+}
+f.addEventListener('submit', go); f.addEventListener('change', go); go();
+</script>
+</html>

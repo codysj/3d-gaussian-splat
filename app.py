@@ -17,7 +17,7 @@ import core
 from support import Scene, camera, render
 
 torch.set_num_threads(int(os.environ.get('THREADS', 1)))
-SIZES = (128, 256, 384)  # dense renderer allocates gaussians x pixels; 384 is ~70 MB
+SIZES = (256, 384, 512)  # dense path allocates gaussians x pixels; 512 x 31 is ~130 MB
 DEMO = os.environ.get('DEMO', 'demo')  # one sub-folder per scene: checkpoint.pt + initial.npz
 
 
@@ -56,7 +56,7 @@ def render_png(q):
     scene = model['initial'] if q.get('scene', [''])[0] == 'initial' else model['trained']
     angle = np.radians(param(q, 'angle', 0, 360, 20))
     elev = param(q, 'elev', -1, 1.5, .35)
-    size = min(SIZES, key=lambda s: abs(s - param(q, 'size', 0, 999, 256, int)))
+    size = min(SIZES, key=lambda s: abs(s - param(q, 'size', 0, 999, 384, int)))
     order = 'reverse' if q.get('order', [''])[0] == 'reverse' else 'depth'
     gi = param(q, 'gi', 0, model['n'] - 1, 0, int)
     with torch.no_grad(), LOCK:
@@ -73,42 +73,10 @@ def render_png(q):
     return buf.getvalue()
 
 
-PAGE = f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width">
-<title>Gaussian splat demo</title>
-<style>
-body{{font:15px system-ui;background:#fff;color:#111;margin:2rem auto;max-width:880px;padding:0 1rem;
-     display:flex;gap:2rem;flex-wrap:wrap;align-items:flex-start}}
-form{{display:grid;gap:.7rem;min-width:280px;flex:1}}
-label{{display:flex;justify-content:space-between;gap:1rem;align-items:center}}
-img{{width:384px;max-width:100%;aspect-ratio:1;background:#090b10;border-radius:4px}}
-small{{color:#666}}
-</style>
-<form id=f>
-<b>Gaussian splats rendered live by the training-path renderer</b>
-<label>Model <select name=model>{''.join(f'<option value={k}{" selected" if k == DEFAULT else ""}>{k} ({v["n"]} Gaussians)</option>' for k, v in SCENES.items())}</select></label>
-<label>Camera angle <input name=angle type=range min=0 max=360 value=20></label>
-<label>Elevation <input name=elev type=range min=-1 max=1.5 step=.05 value=.35></label>
-<label>Scene <select name=scene><option value=trained>trained</option>
-  <option value=initial>initial (before training)</option></select></label>
-<label>Depth order <select name=order><option value=depth>near to far (correct)</option>
-  <option value=reverse>far to near (wrong)</option></select></label>
-<label>Force spherical, same volume <input name=iso type=checkbox></label>
-<label>Gaussian index <input name=gi type=number min=0 value=0></label>
-<label>Override its opacity <input name=ovr type=checkbox></label>
-<label>Opacity value <input name=op type=range min=0 max=1 step=.01 value=.9></label>
-<label>Image size <select name=size><option>128</option><option selected>256</option>
-  <option>384</option></select></label>
-<button>Render</button>
-<small id=t>Each render runs the same dense PyTorch code used for training, on CPU.</small>
-</form>
-<img id=out alt="rendered scene">
-<script>
-const f=document.getElementById('f'),out=document.getElementById('out'),t=document.getElementById('t');
-function go(e){{if(e)e.preventDefault();const t0=performance.now();
-  out.onload=()=>t.textContent='rendered in '+((performance.now()-t0)/1000).toFixed(2)+' s';
-  out.src='/render?'+new URLSearchParams(new FormData(f))}}
-f.onsubmit=go;f.onchange=go;go();
-</script>"""
+# page.html is static apart from the model dropdown, filled in once here.
+OPTIONS = ''.join(f'<option value="{k}" data-n="{v["n"]}"{" selected" if k == DEFAULT else ""}>'
+                  f'{k} ({v["n"]:,} Gaussians)</option>' for k, v in SCENES.items())
+PAGE = open('page.html', encoding='utf-8').read().replace('<!--OPTIONS-->', OPTIONS)
 
 
 class Handler(BaseHTTPRequestHandler):
