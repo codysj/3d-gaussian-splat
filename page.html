@@ -67,7 +67,7 @@
       <img id="out" alt="rendered scene">
       <span class="status" id="status">rendering…</span>
     </div>
-    <p class="caption">Rendered on a CPU with no caching and no pre-computed frames. The robot takes under a second; the 10,000-Gaussian gnome takes about five.</p>
+    <p class="caption">Rendered on a CPU with no caching and no pre-computed frames.</p>
   </div>
 
   <form id="f">
@@ -81,7 +81,7 @@
         <input name="elev" type="range" min="-1" max="1.5" step=".05" value=".35"><output id="elev_out">0.35</output></label>
       <label><span>Image size</span>
         <select name="size"><option>256</option><option selected>384</option><option>512</option></select></label>
-      <p class="hint">Orbit the camera. The scene's parameters never change; only the viewpoint does.</p>
+      <p class="hint">Orbit the camera. The scene's parameters don't change.</p>
     </fieldset>
 
     <fieldset>
@@ -100,7 +100,7 @@
       <label><span>Override its opacity</span><input name="ovr" type="checkbox"></label>
       <label><span>Opacity value</span>
         <input name="op" type="range" min="0" max="1" step=".01" value=".9"><output id="op_out">0.90</output></label>
-      <p class="hint">Edits apply to a copy of the parameters for this one render; the trained scene is never modified.</p>
+      <p class="hint">Edits apply to a copy of the parameters for this one render, the trained scene is never modified.</p>
     </fieldset>
 
     <button id="btn">Render</button>
