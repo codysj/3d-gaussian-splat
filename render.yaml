@@ -1,0 +1,13 @@
+# Render blueprint: New + > Blueprint > pick this repo. Free web service.
+services:
+  - type: web
+    name: gaussian-splat-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: THREADS
+        value: "1"

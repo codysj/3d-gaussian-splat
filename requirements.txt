@@ -1,5 +1,7 @@
+# CPU-only torch wheel: the default PyPI wheel drags in ~2 GB of CUDA libraries.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
 numpy
 matplotlib
 pillow
 plyfile
-# Install torch separately: CPU wheel locally; retain RunPod's CUDA build remotely.
