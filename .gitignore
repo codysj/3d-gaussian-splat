@@ -1,0 +1,16 @@
+# Virtualenv: rebuild from COMMANDS.md, never commit
+.venv/
+
+__pycache__/
+*.pyc
+
+# Generated renders, checkpoints, training logs. Regenerate with run.py.
+outputs/
+*.pt
+results.zip
+
+# Keep validation/ tracked: it is the author's reference evidence, not output.
+
+# Personal working notes and ownership record: local only.
+NOTES.md
+PROGRESS.md

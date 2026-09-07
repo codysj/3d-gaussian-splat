@@ -1,0 +1,32 @@
+{
+  "command": "train",
+  "reference": true,
+  "device": "cpu",
+  "size": 64,
+  "steps": 500,
+  "out": "outputs/validation_one",
+  "data": "outputs/validation_data/dataset.npz",
+  "learn": "all",
+  "views": "one",
+  "lr_factor": 1.0,
+  "resume": null,
+  "checkpoint": "outputs/main/checkpoint.pt",
+  "frames": 36,
+  "stage": "all",
+  "threads": 1,
+  "torch_version": "2.14.0+cpu",
+  "python": "3.12.13",
+  "gpu": "CPU",
+  "gaussian_count": 31,
+  "train_indices": [
+    0
+  ],
+  "test_indices": [
+    1,
+    4,
+    7,
+    10
+  ],
+  "source": "reference",
+  "initialization": "known count + perturbed target parameters"
+}

@@ -1,0 +1,8 @@
+{
+  "training_MSE": 7.586411811644211e-05,
+  "held_out_MSE_before": 0.002475605462677777,
+  "held_out_MSE_after": 0.001865634898422286,
+  "loop_seconds_including_logs": 5.599473864999709,
+  "updates": 500,
+  "held_out_PSNR": 27.29173342966068
+}
