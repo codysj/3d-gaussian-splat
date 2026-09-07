@@ -1,26 +1,4 @@
-# Gaussian rendering workbook starter
 
-Read Gaussian_Rendering_Workbook.pdf in order. This project is a teaching scaffold,
-not a finished project the learner should claim to have independently authored.
-
-## First action
-
-Install the CPU PyTorch build locally and the packages in requirements.txt (see
-COMMANDS.md). Fill TODO 1 in core.py, then run `python run.py check --stage covariance`.
-The five core functions intentionally raise NotImplementedError until implemented.
-Later commands use your functions by default.
-
-## Supplied versus learner work
-
-- **You implement:** covariance, projection, pixel influence, compositing, training update.
-- **Supplied:** model/scene helpers, camera and quaternion helpers, renderer wiring,
-  bounded forward reference, CLI, optimizer groups, experiments, I/O, checks.
-- **Answer key:** reference/core.py. `--reference` explicitly chooses those answers.
-- **Additional exercise:** reconstruct bounded_forward in support.py. Dense training
-  remains separate because the supplied bounded path is forward-only.
-
-Use assistance honestly. Understanding and editing supplied code is different from
-independently implementing it. Record what you reused in NOTES.md.
 
 ## Scope
 
